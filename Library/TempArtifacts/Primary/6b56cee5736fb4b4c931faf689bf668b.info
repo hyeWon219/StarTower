@@ -1,0 +1,67 @@
+using Cinemachine.Utility;
+using UnityEngine;
+using UnityEngine.Serialization;
+
+namespace Cinemachine
+{
+    /// <summary>
+    /// This is a Cinemachine Component in the Body section of the component pipeline.
+    /// Its job is to position the camera in a fixed screen-space relationship to
+    /// the vcam's Follow target object, with offsets and damping.
+    ///
+    /// The camera will be first moved along the camera Z axis until the Follow target
+    /// is at the desired distance from the camera's X-Y plane.  The camera will then
+    /// be moved in its XY plane until the Follow target is at the desired point on
+    /// the camera's screen.
+    ///
+    /// The FramingTansposer will only change the camera's position in space.  It will not
+    /// re-orient or otherwise aim the camera.
+    ///
+    /// For this component to work properly, the vcam's LookAt target must be null.
+    /// The Follow target will define what the camera is looking at.
+    ///
+    /// If the Follow target is a ICinemachineTargetGroup, then additional controls will
+    /// be available to dynamically adjust the camera's view in order to frame the entire group.
+    ///
+    /// Although this component was designed for orthographic cameras, it works equally
+    /// well with persective cameras and can be used in 3D environments.
+    /// </summary>
+    [DocumentationSorting(DocumentationSortingAttribute.Level.UserRef)]
+    [AddComponentMenu("")] // Don't display in add component menu
+    [SaveDuringPlay]
+    public class CinemachineFramingTransposer : CinemachineComponentBase
+    {
+        /// <summary>This setting will instruct the composer to adjust its target offset based
+        /// on the motion of the target.  The composer will look at a point where it estimates
+        /// the target will be this many seconds into the future.  Note that this setting is sensitive
+        /// to noisy animation, and can amplify the noise, resulting in undesirable camera jitter.
+        /// If the camera jitters unacceptably when the target is in motion, turn down this setting,
+        /// or animate the target more smoothly.</summary>
+        [Tooltip("This setting will instruct the composer to adjust its target offset based on the "
+            + "motion of the target.  The composer will look at a point where it estimates the target "
+            + "will be this many seconds into the future.  Note that this setting is sensitive to noisy "
+            + "animation, and can amplify the noise, resulting in undesirable camera jitter.  "
+            + "If the camera jitters unacceptably when the target is in motion, turn down this "
+            + "setting, or animate the target more smoothly.")]
+        [Range(0f, 1f)]
+        public float m_LookaheadTime = 0;
+
+        /// <summary>Controls the smoothness of the lookahead algorithm.  Larger values smooth out
+        /// jittery predictions and also increase prediction lag</summary>
+        [Tooltip("Controls the smoothness of the lookahead algorithm.  Larger values smooth out "
+            + "jittery predictions and also increase prediction lag")]
+        [Range(3, 30)]
+        public float m_LookaheadSmoothing = 10;
+
+        /// <summary>If checked, movement along the Y axis will be ignored for lookahead calculations</summary>
+        [Tooltip("If checked, movement along the Y axis will be ignored for lookahead calculations")]
+        public bool m_LookaheadIgnoreY;
+
+        /// <summary>How aggressively the camera tries to maintain the offset in the X-axis.
+        /// Small numbers are more responsive, rapidly translating the camera to keep the target's
+        /// x-axis offset.  Larger numbers give a more heavy slowly responding camera.
+        /// Using different settings per axis can yield a wide range of camera behaviors</summary>
+        [Space]
+        [Range(0f, 20f)]
+        [Tooltip("How aggressively the camera tries to maintain the offset in the X-axis.  "
+            + "

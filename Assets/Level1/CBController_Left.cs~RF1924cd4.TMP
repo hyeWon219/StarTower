@@ -1,0 +1,20 @@
+/target:library
+/out:Temp/Cinemachine.dll
+/nowarn:0169
+/nowarn:0649
+/deterministic
+/debug:portable
+/optimize-
+/nostdlib+
+/preferreduilang:en-US
+/langversion:8.0
+/reference:Library/PlayerScriptAssemblies/Unity.Postprocessing.Runtime.dll
+/reference:Library/PlayerScriptAssemblies/Unity.Timeline.dll
+/reference:Library/PlayerScriptAssemblies/UnityEngine.UI.dll
+/reference:Assets/Photon/PhotonLibs/WebSocket/websocket-sharp.dll
+/reference:Assets/Photon/PhotonLibs/netstandard2.0/Photon3Unity3D.dll
+/reference:"C:/Program Files/Unity/Hub/Editor/2020.3.16f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/mono/Managed/UnityEngine.AIModule.dll"
+/reference:"C:/Program Files/Unity/Hub/Editor/2020.3.16f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/mono/Managed/UnityEngine.ARModule.dll"
+/reference:"C:/Program Files/Unity/Hub/Editor/2020.3.16f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/mono/Managed/UnityEngine.AccessibilityModule.dll"
+/reference:"C:/Program Files/Unity/Hub/Editor/2020.3.16f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/mono/Managed/UnityEngine.AndroidJNIModule.dll"
+/reference:"C:/Program Files/Unity/Hub/Editor/2020.3.16f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/mono/Managed/UnityEngine.A

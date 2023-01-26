@@ -1,0 +1,276 @@
+using UnityEngine;
+using Cinemachine.Utility;
+using UnityEngine.Serialization;
+using System;
+
+namespace Cinemachine
+{
+    /// <summary>
+    /// A Cinemachine Camera geared towards a 3rd person camera experience.
+    /// The camera orbits around its subject with three separate camera rigs defining
+    /// rings around the target. Each rig has its own radius, height offset, composer,
+    /// and lens settings.
+    /// Depending on the camera's position along the spline connecting these three rigs,
+    /// these settings are interpolated to give the final camera position and state.
+    /// </summary>
+    [DocumentationSorting(DocumentationSortingAttribute.Level.UserRef)]
+    [DisallowMultipleComponent]
+#if UNITY_2018_3_OR_NEWER
+    [ExecuteAlways]
+#else
+    [ExecuteInEditMode]
+#endif
+    [ExcludeFromPreset]
+    [AddComponentMenu("Cinemachine/CinemachineFreeLook")]
+    public class CinemachineFreeLook : CinemachineVirtualCameraBase
+    {
+        /// <summary>Object for the camera children to look at (the aim target)</summary>
+        [Tooltip("Object for the camera children to look at (the aim target).")]
+        [NoSaveDuringPlay]
+        public Transform m_LookAt = null;
+
+        /// <summary>Object for the camera children wants to move with (the body target)</summary>
+        [Tooltip("Object for the camera children wants to move with (the body target).")]
+        [NoSaveDuringPlay]
+        public Transform m_Follow = null;
+
+        /// <summary>If enabled, this lens setting will apply to all three child rigs, otherwise the child rig lens settings will be used</summary>
+        [Tooltip("If enabled, this lens setting will apply to all three child rigs, otherwise the child rig lens settings will be used")]
+        [FormerlySerializedAs("m_UseCommonLensSetting")]
+        public bool m_CommonLens = true;
+
+        /// <summary>Specifies the lens properties of this Virtual Camera.
+        /// This generally mirrors the Unity Camera's lens settings, and will be used to drive
+        /// the Unity camera when the vcam is active</summary>
+        [FormerlySerializedAs("m_LensAttributes")]
+        [Tooltip("Specifies the lens properties of this Virtual Camera.  This generally mirrors the Unity Camera's lens settings, and will be used to drive the Unity camera when the vcam is active")]
+        [LensSettingsProperty]
+        public LensSettings m_Lens = LensSettings.Default;
+
+        /// <summary> Collection of parameters that influence how this virtual camera transitions from
+        /// other virtual cameras </summary>
+        public TransitionParams m_Transitions;
+
+        /// <summary>Legacy support</summary>
+        [SerializeField] [HideInInspector]
+        [FormerlySerializedAs("m_BlendHint")]
+        [FormerlySerializedAs("m_PositionBlending")] private BlendHint m_LegacyBlendHint;
+
+        /// <summary>The Vertical axis.  Value is 0..1.  Chooses how to blend the child rigs</summary>
+        [Header("Axis Control")]
+        [Tooltip("The Vertical axis.  Value is 0..1.  Chooses how to blend the child rigs")]
+        [AxisStateProperty]
+        public AxisState m_YAxis = new AxisState(0, 1, false, true, 2f, 0.2f, 0.1f, "Mouse Y", false);
+
+        /// <summary>Controls how automatic recentering of the Y axis is accomplished</summary>
+        [Tooltip("Controls how automatic recentering of the Y axis is accomplished")]
+        public AxisState.Recentering m_YAxisRecentering = new AxisState.Recentering(false, 1, 2);
+
+        /// <summary>The Horizontal axis.  Value is -180...180.  This is passed on to the rigs' OrbitalTransposer component</summary>
+        [Tooltip("The Horizontal axis.  Value is -180...180.  This is passed on to the rigs' OrbitalTransposer component")]
+        [AxisStateProperty]
+        public AxisState m_XAxis = new AxisState(-180, 180, true, false, 300f, 0.1f, 0.1f, "Mouse X", true);
+
+        /// <summary>The definition of Forward.  Camera will follow behind</summary>
+        [OrbitalTransposerHeadingProperty]
+        [Tooltip("The definition of Forward.  Camera will follow behind.")]
+        public CinemachineOrbitalTransposer.Heading m_Heading
+            = new CinemachineOrbitalTransposer.Heading(
+                CinemachineOrbitalTransposer.Heading.HeadingDefinition.TargetForward, 4, 0);
+
+        /// <summary>Controls how automatic recentering of the X axis is accomplished</summary>
+        [Tooltip("Controls how automatic recentering of the X axis is accomplished")]
+        public AxisState.Recentering m_RecenterToTargetHeading = new AxisState.Recentering(false, 1, 2);
+
+        /// <summary>The coordinate space to use when interpreting the offset from the target</summary>
+        [Header("Orbits")]
+        [Tooltip("The coordinate space to use when interpreting the offset from the target.  This is also used to set the camera's Up vector, which will be maintained when aiming the camera.")]
+        public CinemachineOrbitalTransposer.BindingMode m_BindingMode
+            = CinemachineOrbitalTransposer.BindingMode.SimpleFollowWithWorldUp;
+
+        /// <summary></summary>
+        [Tooltip("Controls how taut is the line that connects the rigs' orbits, which determines final placement on the Y axis")]
+        [Range(0f, 1f)]
+        [FormerlySerializedAs("m_SplineTension")]
+        public float m_SplineCurvature = 0.2f;
+
+        /// <summary>Defines the height and radius of the Rig orbit</summary>
+        [Serializable]
+        public struct Orbit
+        {
+            /// <summary>Height relative to target</summary>
+            public float m_Height;
+            /// <summary>Radius of orbit</summary>
+            public float m_Radius;
+            /// <summary>Constructor with specific values</summary>
+            public Orbit(float h, float r) { m_Height = h; m_Radius = r; }
+        }
+
+        /// <summary>The radius and height of the three orbiting rigs</summary>
+        [Tooltip("The radius and height of the three orbiting rigs.")]
+        public Orbit[] m_Orbits = new Orbit[3]
+        {
+            // These are the default orbits
+            new Orbit(4.5f, 1.75f),
+            new Orbit(2.5f, 3f),
+            new Orbit(0.4f, 1.3f)
+        };
+
+        // Legacy support
+        [SerializeField] [HideInInspector] [FormerlySerializedAs("m_HeadingBias")]
+        private float m_LegacyHeadingBias = float.MaxValue;
+        bool mUseLegacyRigDefinitions = false;
+
+        /// <summary>Enforce bounds for fields, when changed in inspector.</summary>
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+
+            // Upgrade after a legacy deserialize
+            if (m_LegacyHeadingBias != float.MaxValue)
+            {
+                m_Heading.m_Bias= m_LegacyHeadingBias;
+                m_LegacyHeadingBias = float.MaxValue;
+                int heading = (int)m_Heading.m_Definition;
+                if (m_RecenterToTargetHeading.LegacyUpgrade(ref heading, ref m_Heading.m_VelocityFilterStrength))
+                    m_Heading.m_Definition = (CinemachineOrbitalTransposer.Heading.HeadingDefinition)heading;
+                mUseLegacyRigDefinitions = true;
+            }
+            if (m_LegacyBlendHint != BlendHint.None)
+            {
+                m_Transitions.m_BlendHint = m_LegacyBlendHint;
+                m_LegacyBlendHint = BlendHint.None;
+            }
+            m_YAxis.Validate();
+            m_XAxis.Validate();
+            m_RecenterToTargetHeading.Validate();
+            m_YAxisRecentering.Validate();
+            m_Lens.Validate();
+
+            InvalidateRigCache();
+        }
+
+        /// <summary>Get a child rig</summary>
+        /// <param name="i">Rig index.  Can be 0, 1, or 2</param>
+        /// <returns>The rig, or null if index is bad.</returns>
+        public CinemachineVirtualCamera GetRig(int i)
+        {
+            UpdateRigCache();
+            return (i < 0 || i > 2) ? null : m_Rigs[i];
+        }
+
+        /// <summary>Names of the 3 child rigs</summary>
+        public static string[] RigNames { get { return new string[] { "TopRig", "MiddleRig", "BottomRig" }; } }
+
+        bool mIsDestroyed = false;
+
+        /// <summary>Updates the child rig cache</summary>
+        protected override void OnEnable()
+        {
+            mIsDestroyed = false;
+            base.OnEnable();
+            InvalidateRigCache();
+        }
+
+        /// <summary>Makes sure that the child rigs get destroyed in an undo-firndly manner.
+        /// Invalidates the rig cache.</summary>
+        protected override void OnDestroy()
+        {
+            // Make the rigs visible instead of destroying - this is to keep Undo happy
+            if (m_Rigs != null)
+                foreach (var rig in m_Rigs)
+                    if (rig != null && rig.gameObject != null)
+                        rig.gameObject.hideFlags
+                            &= ~(HideFlags.HideInHierarchy | HideFlags.HideInInspector);
+
+            mIsDestroyed = true;
+            base.OnDestroy();
+        }
+
+        /// <summary>Invalidates the rig cache</summary>
+        void OnTransformChildrenChanged()
+        {
+            InvalidateRigCache();
+        }
+
+        void Reset()
+        {
+            DestroyRigs();
+        }
+
+        public override bool PreviousStateIsValid
+        {
+            get { return base.PreviousStateIsValid; }
+            set
+            {
+                if (value == false)
+                    for (int i = 0; m_Rigs != null && i < m_Rigs.Length; ++i)
+                        m_Rigs[i].PreviousStateIsValid = value;
+                base.PreviousStateIsValid = value;
+            }
+        }
+
+        /// <summary>The cacmera state, which will be a blend of the child rig states</summary>
+        override public CameraState State { get { return m_State; } }
+
+        /// <summary>Get the current LookAt target.  Returns parent's LookAt if parent
+        /// is non-null and no specific LookAt defined for this camera</summary>
+        override public Transform LookAt
+        {
+            get { return ResolveLookAt(m_LookAt); }
+            set { m_LookAt = value; }
+        }
+
+        /// <summary>Get the current Follow target.  Returns parent's Follow if parent
+        /// is non-null and no specific Follow defined for this camera</summary>
+        override public Transform Follow
+        {
+            get { return ResolveFollow(m_Follow); }
+            set { m_Follow = value; }
+        }
+
+        /// <summary>Check whether the vcam a live child of this camera.
+        /// Returns true if the child is currently contributing actively to the camera state.</summary>
+        /// <param name="vcam">The Virtual Camera to check</param>
+        /// <param name="dominantChildOnly">If truw, will only return true if this vcam is the dominat live child</param>
+        /// <returns>True if the vcam is currently actively influencing the state of this vcam</returns>
+        public override bool IsLiveChild(ICinemachineCamera vcam, bool dominantChildOnly = false)
+        {
+            // Do not update the rig cache here or there will be infinite loop at creation time
+            if (m_Rigs == null || m_Rigs.Length != 3)
+                return false;
+            var y = GetYAxisValue();
+            if (dominantChildOnly)
+            {
+                if (vcam == (ICinemachineCamera)m_Rigs[0])
+                    return y > 0.666f;
+                if (vcam == (ICinemachineCamera)m_Rigs[2])
+                    return y < 0.333;
+                if (vcam == (ICinemachineCamera)m_Rigs[1])
+                    return y >= 0.333f && y <= 0.666f;
+                return false;
+            }
+            if (vcam == (ICinemachineCamera)m_Rigs[1])
+                return true;
+            if (y < 0.5f)
+                return vcam == (ICinemachineCamera)m_Rigs[2];
+            return vcam == (ICinemachineCamera)m_Rigs[0];
+        }
+
+        /// <summary>This is called to notify the vcam that a target got warped,
+        /// so that the vcam can update its internal state to make the camera
+        /// also warp seamlessy.</summary>
+        /// <param name="target">The object that was warped</param>
+        /// <param name="positionDelta">The amount the target's position changed</param>
+        public override void OnTargetObjectWarped(Transform target, Vector3 positionDelta)
+        {
+            UpdateRigCache();
+            if (m_Rigs != null)
+                foreach (var vcam in m_Rigs)
+                    vcam.OnTargetObjectWarped(target, positionDelta);
+            base.OnTargetObjectWarped(target, positionDelta);
+        }
+
+        /// <summary>Internal use only.  Called by CinemachineCore at designated update time
+        /// so the vcam can position itself and track its targets.  All 3 child rigs are updated,
+        /// and a blend calculated, depending on
